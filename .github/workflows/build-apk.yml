@@ -1,16 +1,19 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  build-apk:
+    name: Build Debug APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -19,32 +22,48 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Create .env file
-        run: |
-          # If the app needs a Gemini API key at build time, add it as a
-          # repo secret named GEMINI_API_KEY (Settings > Secrets and variables
-          # > Actions), then this line writes it into a .env file the app expects.
-          echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" >> .env
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Grant execute permission for gradlew
+      - name: Prepare Environment File
         run: |
-          if [ ! -f gradlew ]; then
-            gradle wrapper
+          if [ -f .env.example ]; then
+            cp .env.example .env
+          else
+            touch .env
           fi
-          chmod +x gradlew
+          if [ -n "${{ secrets.GEMINI_API_KEY }}" ]; then
+            echo "GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}" > .env
+          fi
 
-      - name: Fix known KSP 2.3.5 CI bug
+      - name: Prepare Debug Keystore
         run: |
-          # KSP 2.3.5 throws a NullPointerException in headless/CI environments
-          # (google/ksp#2763). Bump it to 2.3.8+, which is confirmed compatible
-          # with Kotlin 2.2.x and newer.
-          sed -i 's/googleDevtoolsKsp = "2.3.5"/googleDevtoolsKsp = "2.3.8"/' gradle/libs.versions.toml
+          if [ -f debug.keystore.base64 ]; then
+            base64 -d debug.keystore.base64 > debug.keystore
+          fi
+          if [ ! -f debug.keystore ]; then
+            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
-      - name: Upload APK
+      - name: Ensure Gradle Wrapper
+        run: |
+          if [ ! -f ./gradlew ]; then
+            gradle wrapper --gradle-version 9.3.1
+          fi
+          chmod +x ./gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: chess-debug-apk
+          name: chess-ai-debug-apk
           path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
