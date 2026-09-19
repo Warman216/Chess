@@ -33,6 +33,13 @@ jobs:
           fi
           chmod +x gradlew
 
+      - name: Fix known KSP 2.3.5 CI bug
+        run: |
+          # KSP 2.3.5 throws a NullPointerException in headless/CI environments
+          # (google/ksp#2763). Bump it to 2.3.8+, which is confirmed compatible
+          # with Kotlin 2.2.x and newer.
+          sed -i 's/googleDevtoolsKsp = "2.3.5"/googleDevtoolsKsp = "2.3.8"/' gradle/libs.versions.toml
+
       - name: Build debug APK
         run: ./gradlew assembleDebug --no-daemon
 
